@@ -52,3 +52,6 @@ export const searchJourneys = (q: JourneyQuery, cursor = '') =>
   get<JourneysPage>('/journeys', { ...q, cursor });
 
 export const refreshJourney = (id: string) => get<Journey>('/journeys/refresh', { id });
+
+export const reverseGeocode = (lat: number, lon: number) =>
+  get<{ name: string | null }>('/reverse', { lat: String(lat), lon: String(lon) }).then((r) => r.data.name);

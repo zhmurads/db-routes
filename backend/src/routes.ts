@@ -17,6 +17,23 @@ const hash = (s: string) => createHash('sha1').update(s).digest('hex').slice(0, 
 
 const ok = (data: unknown) => ({ ok: true, data, updatedAt: new Date().toISOString() });
 
+// Точка — либо id остановки, либо координаты «широта,долгота» (местоположение пользователя).
+const COORD = /^(-?\d{1,2}(?:\.\d+)?),(-?\d{1,3}(?:\.\d+)?)$/;
+function coords(v: string): { lat: number; lon: number } | null {
+  const m = COORD.exec(v);
+  if (!m) return null;
+  const lat = Number(m[1]), lon = Number(m[2]);
+  if (Math.abs(lat) > 90 || Math.abs(lon) > 180) throw new ApiError(400, 'BAD_PLACE', 'Неверные координаты');
+  return { lat, lon };
+}
+// Округление до 5 знаков (~1 м): точнее не нужно, а кэш попадает чаще.
+const place = (v: string) => {
+  const c = coords(v);
+  return c ? `${c.lat.toFixed(5)},${c.lon.toFixed(5)}` : v;
+};
+// Сколько можно идти пешком от/до точки-координаты до станции.
+const WALK_FROM_POINT_S = 1200;
+
 // Автодополнение станций.
 api.get('/stations', async (req, res) => {
   const q = str(req, 'q');
@@ -49,8 +66,10 @@ api.get('/journeys', async (req, res) => {
   const via = str(req, 'via');
 
   const query = {
-    fromPlace: from,
-    toPlace: to,
+    fromPlace: place(from),
+    toPlace: place(to),
+    maxPreTransitTime: coords(from) ? WALK_FROM_POINT_S : undefined,
+    maxPostTransitTime: coords(to) ? WALK_FROM_POINT_S : undefined,
     via: via || undefined,
     time: when ? berlinToUtc(when) : undefined,
     arriveBy: str(req, 'mode') === 'arr' ? true : undefined,
@@ -84,6 +103,21 @@ api.get('/journeys/refresh', async (req, res) => {
     // Поезда DB сверяем с табло DB (если задан ключ Timetables API).
     await enrichWithDb(j);
     return j;
+  });
+  res.json(ok(data));
+});
+
+// Адрес по координатам — подпись для «Моё местоположение».
+api.get('/reverse', async (req, res) => {
+  const c = coords(`${str(req, 'lat')},${str(req, 'lon')}`);
+  if (!c) throw new ApiError(400, 'BAD_PLACE', 'Неверные координаты');
+  const at = `${c.lat.toFixed(4)},${c.lon.toFixed(4)}`; // ~10 м
+  const data = await cached(`rv:${at}`, 24 * 3600, async () => {
+    const m = await upstream<N.MMatch[]>('/api/v1/reverse-geocode', { place: at, numResults: 1 });
+    const a = m[0] as (N.MMatch & { street?: string; houseNumber?: string }) | undefined;
+    if (!a) return { name: null };
+    const name = a.street ? `${a.street}${a.houseNumber ? ' ' + a.houseNumber : ''}` : a.name;
+    return { name };
   });
   res.json(ok(data));
 });

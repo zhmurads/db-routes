@@ -1,5 +1,5 @@
 import './style.css';
-import { ApiError, refreshJourney, searchJourneys, searchStations, type Journey, type JourneyQuery, type Station } from './api';
+import { ApiError, refreshJourney, reverseGeocode, searchJourneys, searchStations, type Journey, type JourneyQuery, type Station } from './api';
 import { keepView, mapEl, showJourney } from './map';
 import { berlinDay, detailsEl, h, hhmmss, summaryEl } from './render';
 import * as W from './watch';
@@ -19,7 +19,8 @@ const AUTO_REFRESH_MS = 60_000;
 
 // ---------- Станции и автодополнение ----------
 
-type Picked = { id: string; name: string } | null;
+// geo: точка — местоположение пользователя (id = «широта,долгота»), а не станция.
+type Picked = { id: string; name: string; geo?: boolean } | null;
 const picked: Record<string, Picked> = { from: null, to: null, via: null };
 
 const RECENT_KEY = 'db-routes:recent';
@@ -72,6 +73,7 @@ function setupStation(field: 'from' | 'to' | 'via') {
 
   input.addEventListener('input', () => {
     picked[field] = null;
+    input.classList.remove('is-geo');
     clearTimeout(timer);
     const q = input.value.trim();
     if (q.length < 2) { show(q ? [] : recent(), q ? undefined : undefined); return; }
@@ -96,7 +98,15 @@ function setupStation(field: 'from' | 'to' | 'via') {
     else if (e.key === 'Escape') close();
   });
 
-  return { input, set: (p: Picked) => { picked[field] = p; input.value = p?.name ?? ''; } };
+  return {
+    input,
+    set: (p: Picked) => {
+      picked[field] = p;
+      input.value = p?.name ?? '';
+      input.classList.toggle('is-geo', !!p?.geo);
+      input.classList.remove('invalid');
+    },
+  };
 }
 
 const st = { from: setupStation('from'), to: setupStation('to'), via: setupStation('via') };
@@ -108,6 +118,46 @@ $('swap').addEventListener('click', () => {
   if (!b) st.from.input.value = bv;
   if (!a) st.to.input.value = av;
 });
+
+// ---------- Моё местоположение ----------
+
+function currentPosition(): Promise<GeolocationPosition> {
+  return new Promise((resolve, reject) => {
+    if (!('geolocation' in navigator)) { reject(new Error('Браузер не умеет определять местоположение')); return; }
+    navigator.geolocation.getCurrentPosition(resolve, (e) => reject(new Error(
+      e.code === e.PERMISSION_DENIED ? 'Доступ к местоположению запрещён в настройках браузера для этого сайта'
+        : e.code === e.TIMEOUT ? 'Не удалось определить местоположение вовремя, попробуйте ещё раз'
+          : 'Не удалось определить местоположение',
+    )), { enableHighAccuracy: true, timeout: 15_000, maximumAge: 60_000 });
+  });
+}
+
+// Подставить текущее местоположение в поле. Координаты уходят только в наш backend и Transitous, в URL не пишутся.
+async function useMyLocation(field: 'from' | 'to'): Promise<boolean> {
+  const btn = document.getElementById(`${field}-geo`);
+  btn?.classList.add('busy');
+  setStatus('Определяю местоположение…');
+  try {
+    const pos = await currentPosition();
+    const lat = pos.coords.latitude, lon = pos.coords.longitude;
+    const id = `${lat.toFixed(5)},${lon.toFixed(5)}`;
+    st[field].set({ id, name: '📍 Моё местоположение', geo: true });
+    const acc = Math.round(pos.coords.accuracy);
+    setStatus(acc > 300 ? `Местоположение определено примерно (±${acc} м)` : '');
+    // Подпись адресом — не обязательна, ошибки здесь не мешают поиску.
+    reverseGeocode(lat, lon).then((name) => {
+      if (name && picked[field]?.id === id) st[field].set({ id, name: `📍 ${name}`, geo: true });
+    }).catch(() => {});
+    return true;
+  } catch (err) {
+    setStatus((err as Error).message, true);
+    return false;
+  } finally {
+    btn?.classList.remove('busy');
+  }
+}
+
+$('from-geo').addEventListener('click', () => { useMyLocation('from'); });
 
 // ---------- Дата и время (всегда по Берлину) ----------
 
@@ -133,9 +183,13 @@ let busy = false;
 function readForm(): JourneyQuery | null {
   let ok = true;
   for (const f of ['from', 'to'] as const) {
-    if (!picked[f]) { st[f].input.classList.add('invalid'); ok = false; }
+    if (!picked[f]?.id) { st[f].input.classList.add('invalid'); ok = false; }
   }
-  if (!ok) { setStatus('Выберите станции из списка подсказок', true); return null; }
+  if (!ok) {
+    const geoMissing = (['from', 'to'] as const).some((f) => picked[f]?.geo && !picked[f]?.id);
+    setStatus(geoMissing ? 'Местоположение не определено — нажмите 📍 ещё раз' : 'Выберите станции из списка подсказок', true);
+    return null;
+  }
   const products = [...form.querySelectorAll<HTMLInputElement>('input[name=p]:checked')].map((i) => i.value);
   if (!products.length) { setStatus('Выберите хотя бы один вид транспорта', true); return null; }
   const mode = (form.querySelector<HTMLInputElement>('input[name=mode]:checked')?.value ?? 'dep') as 'dep' | 'arr';
@@ -152,8 +206,11 @@ function readForm(): JourneyQuery | null {
 
 function writeUrl(q: JourneyQuery) {
   const p = new URLSearchParams();
-  p.set('from', q.from); p.set('fromName', picked.from!.name);
-  p.set('to', q.to); p.set('toName', picked.to!.name);
+  // Местоположение пишем как «geo»: координаты не попадают в историю браузера и закладки.
+  for (const f of ['from', 'to'] as const) {
+    if (picked[f]!.geo) p.set(f, 'geo');
+    else { p.set(f, q[f]); p.set(`${f}Name`, picked[f]!.name); }
+  }
   if (q.via) { p.set('via', q.via); p.set('viaName', picked.via!.name); }
   if (q.when) p.set('when', q.when);
   if (q.mode === 'arr') p.set('mode', 'arr');
@@ -162,11 +219,15 @@ function writeUrl(q: JourneyQuery) {
   history.replaceState(null, '', `?${p}`);
 }
 
+// Поля с «geo» в URL: местоположение надо определить заново перед поиском.
+const geoFromUrl: ('from' | 'to')[] = [];
+
 function readUrl(): boolean {
   const p = new URLSearchParams(location.search);
   const take = (f: 'from' | 'to' | 'via') => {
     const id = p.get(f), name = p.get(`${f}Name`);
-    if (id && name) st[f].set({ id, name });
+    if (id === 'geo' && f !== 'via') { geoFromUrl.push(f); st[f].set({ id: '', name: '📍 Моё местоположение', geo: true }); }
+    else if (id && name) st[f].set({ id, name });
   };
   take('from'); take('to'); take('via');
   if (picked.via) ($<HTMLDetailsElement>('more')).open = true;
@@ -396,6 +457,8 @@ earlierBtn.addEventListener('click', () => page('earlier'));
 laterBtn.addEventListener('click', () => page('later'));
 
 setNow();
-if (readUrl()) search();
+if (readUrl()) {
+  Promise.all(geoFromUrl.map((f) => useMyLocation(f))).then((oks) => { if (oks.every(Boolean)) search(); });
+}
 // Отслеживание пережило перезагрузку: сразу сверяемся (изменения, пока страница была закрыта, тоже придут).
 if (watch) refreshWatched().then(scheduleRefresh);

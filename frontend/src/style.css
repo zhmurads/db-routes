@@ -226,3 +226,12 @@ details#more summary { cursor: pointer; color: var(--muted); font-size: 14px; }
 .watch.on { background: var(--text); color: var(--panel); border-color: var(--text); }
 .watch-note { font-size: 12px; color: var(--muted); flex-basis: 100%; }
 .card-tools { flex-wrap: wrap; }
+
+/* Кнопка «моё местоположение» внутри поля */
+.input-wrap { position: relative; }
+.input-wrap input { padding-right: 46px; }
+.geo { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); width: 38px; height: 38px; border: 0; border-radius: 6px; background: transparent; font-size: 18px; cursor: pointer; }
+.geo:hover { background: var(--line); }
+.geo.busy { animation: geo-pulse 1s ease-in-out infinite; }
+@keyframes geo-pulse { 50% { opacity: .3; } }
+input.is-geo { color: var(--focus); font-weight: 500; }

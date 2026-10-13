@@ -19,8 +19,11 @@
       <div class="stations">
         <div class="field station" data-field="from">
           <label for="from">Откуда</label>
-          <input id="from" type="text" placeholder="Станция отправления" role="combobox"
-                 aria-autocomplete="list" aria-expanded="false" aria-controls="from-list" enterkeyhint="next">
+          <div class="input-wrap">
+            <input id="from" type="text" placeholder="Станция или 📍 моё местоположение" role="combobox"
+                   aria-autocomplete="list" aria-expanded="false" aria-controls="from-list" enterkeyhint="next">
+            <button type="button" id="from-geo" class="geo" title="Моё местоположение" aria-label="Отправление от моего местоположения">📍</button>
+          </div>
           <ul id="from-list" class="suggest" role="listbox" hidden></ul>
         </div>
         <button type="button" id="swap" class="swap" title="Поменять местами" aria-label="Поменять станции местами">⇅</button>

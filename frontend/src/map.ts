@@ -112,6 +112,17 @@ export async function showJourney(j: Journey): Promise<void> {
     end(l.destinationPos, l.destination, l.arr.actual ?? l.arr.planned, l.arr.platform);
   }
 
+  // Маршрут от/до местоположения пользователя: первый/последний отрезок пешком от точки START/END.
+  const first = j.legs[0], last = j.legs[j.legs.length - 1];
+  if (first?.walking && first.origin === 'START') {
+    L.circleMarker(first.originPos, { radius: 7, color: '#2563eb', weight: 3, fillColor: '#2563eb', fillOpacity: 0.35 })
+      .bindTooltip('Вы здесь').addTo(layer);
+  }
+  if (last?.walking && last.destination === 'END') {
+    L.circleMarker(last.destinationPos, { radius: 7, color: '#1b1d22', weight: 3, fillColor: '#fff', fillOpacity: 1 })
+      .bindTooltip('Пункт назначения').addTo(layer);
+  }
+
   // Старт и финиш крупнее.
   const transit = j.legs.filter((l) => !l.walking);
   if (transit.length) {
