@@ -1,4 +1,5 @@
 import type { Journey, Leg, Stopover, TimePoint, Warning } from './api';
+import { countdownText, leaveState, type Access } from './access';
 
 // Небольшой помощник для DOM: строки всегда идут как текст, а не как HTML.
 type Child = Node | string | null | undefined | false;
@@ -110,9 +111,13 @@ function stopoversEl(stops: Stopover[]): HTMLElement | null {
 // MOTIS называет точки начала и конца поиска служебными START / END.
 const placeName = (name: string) => (name === 'END' ? 'пункт назначения' : name === 'START' ? 'место отправления' : name);
 
-function legEl(l: Leg): HTMLElement {
+const distText = (m: number) => (m < 1000 ? `${m} м` : `${(m / 1000).toFixed(1).replace('.', ',')} км`);
+
+function legEl(l: Leg, leaveAt?: number): HTMLElement {
   if (l.walking) {
-    return h('li', { class: 'leg walk' }, `🚶 Пешком ${l.durationMin} мин`, l.distanceM ? ` · ${l.distanceM} м` : '', ` → ${placeName(l.destination)}`);
+    return h('li', { class: 'leg walk' }, `🚶 Пешком ${l.durationMin} мин`, l.distanceM ? ` · ${distText(l.distanceM)}` : '',
+      ` → ${placeName(l.destination)}`,
+      leaveAt ? h('strong', { class: 'leave-at' }, ` · выйти в ${hhmm(new Date(leaveAt).toISOString())}`) : null);
   }
   return h('li', { class: 'leg' + (l.cancelled ? ' is-cancelled' : '') },
     h('div', { class: 'leg-head' },
@@ -130,7 +135,7 @@ function legEl(l: Leg): HTMLElement {
     warningsEl(l.warnings));
 }
 
-export function detailsEl(j: Journey): HTMLElement {
+export function detailsEl(j: Journey, access?: Access | null): HTMLElement {
   const items: HTMLElement[] = [];
   j.legs.forEach((l, i) => {
     const prev = j.legs.slice(0, i).reverse().find((x) => !x.walking);
@@ -138,25 +143,57 @@ export function detailsEl(j: Journey): HTMLElement {
       const t = transferEl(prev, l);
       if (t) items.push(t);
     }
-    items.push(legEl(l));
+    // Время выхода — у первого пешего отрезка от вашего местоположения.
+    items.push(legEl(l, i === 0 && access && !access.estimate ? access.leaveAt : undefined));
   });
   return h('ol', { class: 'legs' }, ...items);
 }
 
-export function summaryEl(j: Journey, refDay: string): HTMLElement {
+// Строка «🚶 4 мин (260 м) до S+U Alexanderplatz · выйти в 08:29 · через 12 мин».
+// data-leave / data-dep — чтобы обратный отсчёт обновлялся без перерисовки.
+export function accessEl(a: Access): HTMLElement | null {
+  const state = leaveState(a);
+  if (state === 'gone') return null;
+  const leave = hhmm(new Date(a.leaveAt).toISOString());
+  return h('div', { class: `access ${state}`, 'data-leave': String(a.leaveAt), 'data-dep': String(a.trainDep) },
+    h('span', { class: 'walk' }, `🚶 ${a.walkMin} мин`, a.distanceM ? ` (${distText(a.distanceM)})` : '', ` до ${a.station}`),
+    h('span', {}, ` · выйти в ${leave}`, a.trainDelay && a.trainDelay > 0 ? ` (поезд +${a.trainDelay})` : ''),
+    h('span', {}, ' · ', h('span', { class: 'countdown' }, countdownText(a))),
+    a.estimate ? h('span', { class: 'muted' }, ' · от вашего местоположения') : null);
+}
+
+// Обновить тексты обратного отсчёта на странице (раз в 30 с).
+export function tickCountdowns(root: ParentNode, now = Date.now()) {
+  root.querySelectorAll<HTMLElement>('.access[data-leave]').forEach((el) => {
+    const a = { leaveAt: Number(el.dataset.leave), trainDep: Number(el.dataset.dep) };
+    const state = leaveState(a, now);
+    el.className = `access ${state}`;
+    const c = el.querySelector('.countdown');
+    if (c) c.textContent = countdownText(a, now);
+  });
+}
+
+export function summaryEl(j: Journey, refDay: string, access?: Access | null): HTMLElement {
   const transit = j.legs.filter((l) => !l.walking);
   const firstDep = transit[0]?.dep ?? j.departure;
+  // Длительность: от двери (маршрут от местоположения) или поездка + пешком (оценка).
+  const dur = access && !access.estimate
+    ? h('span', { title: 'Включая путь пешком до станции' }, `${duration(j.durationMin)} от двери`)
+    : access?.estimate
+      ? h('span', {}, duration(j.durationMin), h('span', { class: 'muted' }, ` + ${access.walkMin} мин пешком`))
+      : h('span', {}, duration(j.durationMin));
   return h('div', { class: 'summary' },
     h('div', { class: 'times' },
       timeEl(j.departure, refDay),
       h('span', { class: 'arrow' }, '→'),
       timeEl(j.arrival, refDay)),
     h('div', { class: 'meta' },
-      h('span', {}, duration(j.durationMin)),
+      dur,
       h('span', {}, transfersText(j.transfers)),
       j.cancelled ? h('span', { class: 'tag bad' }, 'Отмена') : null,
       j.warnings.length ? h('span', { class: 'tag warn', title: j.warnings.map((w) => w.title).join('\n') }, `⚠ ${j.warnings.length}`) : null,
       !j.realtime ? h('span', { class: 'tag muted' }, 'по расписанию') : null),
+    access ? accessEl(access) : null,
     h('div', { class: 'lines' },
       ...transit.flatMap((l, i) => [i ? h('span', { class: 'sep' }, '›') : null, lineBadge(l)]),
       platformEl(firstDep)));

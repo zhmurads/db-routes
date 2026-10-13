@@ -35,6 +35,7 @@ function lineNumber(l: Leg): string | null {
 
 async function findOnBoard(stopId: string | null, pos: Pos, plannedIso: string, kind: Kind, l: Leg, plannedPlatform: string | null): Promise<Hit | null> {
   const t = toIris(plannedIso);
+  const plannedMs = Date.parse(plannedIso);
   const day = t.slice(0, 6), hour = t.slice(6, 8);
   const nums = trainNumbers(l);
   const family = FAMILY[l.product] ?? [];
@@ -44,10 +45,14 @@ async function findOnBoard(stopId: string | null, pos: Pos, plannedIso: string, 
     for (const eva of await stationEvas(near.eva)) {
       if (tried.has(eva)) continue;
       tried.add(eva);
-      const atTime = (await plan(eva, day, hour)).filter((s) => s[kind]?.pt === t && !s[kind]!.hidden);
-      if (!atTime.length) continue;
-      const byNumber = atTime.find((s) => nums.includes(String(Number(s.number))));
+      const slice = (await plan(eva, day, hour)).filter((s) => s[kind] && !s[kind]!.hidden);
+      // По номеру поезда — с допуском ±2 мин: источники иногда расходятся на минуту
+      // (ICE 220 в Düsseldorf: у DB прибытие 09:10, у Transitous 09:11).
+      const byNumber = slice.find((s) => nums.includes(String(Number(s.number)))
+        && Math.abs(Date.parse(fromIris(s[kind]!.pt)) - plannedMs) <= 2 * 60_000);
       if (byNumber) return { eva, stop: byNumber };
+      const atTime = slice.filter((s) => s[kind]!.pt === t);
+      if (!atTime.length) continue;
       // Номер линии (l): «S8» → 8, «RE5» → 5 — при той же категории.
       const lineNo = lineNumber(l);
       const byLine = lineNo ? atTime.filter((s) => family.includes(s.category) && s[kind]?.line === lineNo) : [];
@@ -95,6 +100,8 @@ async function enrichPoint(l: Leg, kind: Kind, now: number): Promise<Warning[]> 
   const ev = ch?.[kind];
 
   tp.source = 'db';
+  // Плановое время — тоже с табло DB: при сопоставлении с допуском оно может отличаться от Transitous на минуту.
+  tp.planned = fromIris(planned.pt);
   tp.plannedPlatform = planned.pp ?? tp.plannedPlatform;
   tp.platform = ev?.cp ?? planned.pp ?? tp.platform;
   if (ev?.ct) {

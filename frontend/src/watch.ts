@@ -7,7 +7,13 @@ const KEY = 'db-routes:watch';
 interface PointSnap { delay: number | null; actual: string | null; platform: string | null; cancelled: boolean }
 interface LegSnap { name: string; cancelled: boolean; dep: PointSnap; arr: PointSnap; depStop: string; arrStop: string }
 export interface Snapshot { legs: Record<string, LegSnap>; transfers: { at: string; min: number }[]; warnings: string[] }
-export interface Watch { id: string; title: string; snap: Snapshot }
+// leave — когда выходить из дома (если до станции идти пешком от вашего местоположения);
+// leaveNotified — для какого времени выхода уже было уведомление «Пора выходить».
+export interface Watch {
+  id: string; title: string; snap: Snapshot;
+  leave?: { leaveAt: number; trainDep: number; text: string } | null;
+  leaveNotified?: number;
+}
 
 const point = (t: TimePoint): PointSnap => ({ delay: t.delayMin, actual: t.actual, platform: t.platform, cancelled: t.cancelled });
 // Сегмент опознаём по линии и станции отправления: id маршрута после обновления может смениться.

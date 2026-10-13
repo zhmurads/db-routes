@@ -121,3 +121,22 @@ api.get('/reverse', async (req, res) => {
   });
   res.json(ok(data));
 });
+
+// Время пешком от точки (местоположение пользователя) до станций: минуты или null (недостижимо / дольше часа).
+const WALK_MAX_POINTS = 20;
+api.get('/walk', async (req, res) => {
+  const from = coords(str(req, 'from'));
+  const to = str(req, 'to').split('|').filter(Boolean).map(coords);
+  if (!from || !to.length || to.some((c) => !c)) throw new ApiError(400, 'BAD_PLACE', 'Неверные координаты');
+  if (to.length > WALK_MAX_POINTS) throw new ApiError(400, 'TOO_MANY', `Не больше ${WALK_MAX_POINTS} станций за раз`);
+  const r4 = (c: { lat: number; lon: number }) => `${c.lat.toFixed(4)};${c.lon.toFixed(4)}`;
+  const one = r4(from);
+  const many = (to as { lat: number; lon: number }[]).map(r4);
+  const data = await cached(`wk:${hash(one + '>' + many.join(','))}`, 24 * 3600, async () => {
+    const r = await upstream<{ duration?: number }[]>('/api/v1/one-to-many', {
+      one, many: many.join(','), mode: 'WALK', max: 3600, maxMatchingDistance: 250, arriveBy: false,
+    });
+    return r.map((x) => (typeof x.duration === 'number' ? Math.ceil(x.duration / 60) : null));
+  });
+  res.json(ok(data));
+});

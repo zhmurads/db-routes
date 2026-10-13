@@ -53,5 +53,12 @@ export const searchJourneys = (q: JourneyQuery, cursor = '') =>
 
 export const refreshJourney = (id: string) => get<Journey>('/journeys/refresh', { id });
 
+// Время пешком (минуты или null) от точки до станций.
+export const walkTimes = (from: Pos, to: Pos[]) =>
+  get<(number | null)[]>('/walk', {
+    from: `${from[0].toFixed(5)},${from[1].toFixed(5)}`,
+    to: to.map((p) => `${p[0].toFixed(5)},${p[1].toFixed(5)}`).join('|'),
+  }).then((r) => r.data);
+
 export const reverseGeocode = (lat: number, lon: number) =>
   get<{ name: string | null }>('/reverse', { lat: String(lat), lon: String(lon) }).then((r) => r.data.name);

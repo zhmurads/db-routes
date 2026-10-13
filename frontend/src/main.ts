@@ -3,6 +3,9 @@ import { ApiError, refreshJourney, reverseGeocode, searchJourneys, searchStation
 import { keepView, mapEl, showJourney } from './map';
 import { berlinDay, detailsEl, h, hhmmss, summaryEl } from './render';
 import * as W from './watch';
+import { accessOf, leaveState, missingStations, posKey } from './access';
+import { tickCountdowns } from './render';
+import { walkTimes, type Pos } from './api';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const form = $<HTMLFormElement>('search');
@@ -133,6 +136,36 @@ function currentPosition(): Promise<GeolocationPosition> {
 }
 
 // Подставить текущее местоположение в поле. Координаты уходят только в наш backend и Transitous, в URL не пишутся.
+// Местоположение пользователя: только в памяти (не в URL и не в localStorage).
+let myPos: Pos | null = null;
+// Время пешком от myPos до станций (ключ — координаты станции), сбрасывается при новом местоположении.
+const walkMap = new Map<string, number | null>();
+
+function setMyPos(lat: number, lon: number) {
+  if (!myPos || Math.abs(myPos[0] - lat) > 0.0005 || Math.abs(myPos[1] - lon) > 0.0005) walkMap.clear();
+  myPos = [lat, lon];
+}
+
+// Определить местоположение без изменения полей формы (для оценки пути пешком).
+async function locateQuietly(ask: boolean): Promise<boolean> {
+  if (myPos) return true;
+  if (!ask) {
+    // Без лишних запросов: молча, только если браузер уже разрешил.
+    try {
+      const p = await navigator.permissions?.query({ name: 'geolocation' as PermissionName });
+      if (p?.state !== 'granted') return false;
+    } catch { return false; }
+  }
+  try {
+    const pos = await currentPosition();
+    setMyPos(pos.coords.latitude, pos.coords.longitude);
+    return true;
+  } catch (err) {
+    if (ask) setStatus((err as Error).message, true);
+    return false;
+  }
+}
+
 async function useMyLocation(field: 'from' | 'to'): Promise<boolean> {
   const btn = document.getElementById(`${field}-geo`);
   btn?.classList.add('busy');
@@ -140,6 +173,7 @@ async function useMyLocation(field: 'from' | 'to'): Promise<boolean> {
   try {
     const pos = await currentPosition();
     const lat = pos.coords.latitude, lon = pos.coords.longitude;
+    setMyPos(lat, lon);
     const id = `${lat.toFixed(5)},${lon.toFixed(5)}`;
     st[field].set({ id, name: '📍 Моё местоположение', geo: true });
     const acc = Math.round(pos.coords.accuracy);
@@ -254,7 +288,7 @@ function setStatus(text: string, error = false) {
 function cardEl(j: Journey): HTMLElement {
   const open = j.id === openId;
   const card = h('li', { class: 'journey' + (open ? ' open' : '') + (j.cancelled ? ' is-cancelled' : ''), 'data-id': j.id });
-  const head = h('button', { type: 'button', class: 'card-head', 'aria-expanded': String(open) }, summaryEl(j, refDay));
+  const head = h('button', { type: 'button', class: 'card-head', 'aria-expanded': String(open) }, summaryEl(j, refDay, accessOf(j, walkMap)));
   head.addEventListener('click', () => toggle(j.id));
   card.append(head);
   if (open) {
@@ -268,7 +302,7 @@ function cardEl(j: Journey): HTMLElement {
       h('div', { class: 'card-tools' }, refreshBtn, watchBtn, h('span', { class: 'muted updated' }),
         watching ? h('span', { class: 'watch-note' }, 'Уведомления приходят, пока эта вкладка открыта и Mac не спит') : null),
       mapEl,
-      detailsEl(j)));
+      detailsEl(j, accessOf(j, walkMap))));
   }
   return card;
 }
@@ -285,8 +319,48 @@ function render() {
     if (u && updatedAt[j.id]) u.textContent = `обновлено ${updatedAt[j.id]}`;
     return el;
   }));
+  // Маршрут от станции, а местоположение неизвестно — предложить учесть путь пешком.
+  walkAskBtn.hidden = !journeys.length || !!myPos || !!picked.from?.geo;
+  // Один раз над списком, а не в каждой карточке.
+  walkNote.hidden = !journeys.some((j) => { const a = accessOf(j, walkMap); return !!a?.estimate && a.walkMin > 30; });
   drawMap();
 }
+
+// ---------- Пешком до станции отправления ----------
+
+const walkAskBtn = h('button', { type: 'button', class: 'link walk-ask', hidden: true },
+  '🚶 Учесть путь пешком от меня до станции') as HTMLButtonElement;
+const walkNote = h('p', { class: 'walk-note', hidden: true },
+  '🚶 До станции далеко идти — нажмите 📍 в поле «Откуда», чтобы искать маршрут прямо от вас (с транспортом до вокзала).');
+listEl.before(walkAskBtn, walkNote);
+walkAskBtn.addEventListener('click', () => { loadWalkTimes(true); });
+
+// Посчитать время пешком от пользователя до станций первых поездов (сценарий «Откуда = станция»).
+async function loadWalkTimes(ask: boolean) {
+  if (picked.from?.geo || !journeys.length) return;
+  if (!(await locateQuietly(ask))) { render(); return; }
+  const need = missingStations(journeys, walkMap).slice(0, 20);
+  if (need.length) {
+    try {
+      const mins = await walkTimes(myPos!, need);
+      need.forEach((p, i) => walkMap.set(posKey(p), mins[i] ?? null));
+    } catch (err) {
+      if (ask) setStatus((err as Error).message, true);
+    }
+  }
+  render();
+}
+
+// Раз в 30 с: обратный отсчёт «выйти через N мин» и уведомление «Пора выходить» для отслеживаемой поездки.
+setInterval(() => {
+  if (document.visibilityState === 'visible') tickCountdowns(listEl);
+  const lv = watch?.leave;
+  if (watch && lv && leaveState(lv) === 'now' && watch.leaveNotified !== lv.leaveAt) {
+    W.notify(watch, [`Пора выходить: ${lv.text}`]);
+    watch = { ...watch, leaveNotified: lv.leaveAt };
+    W.save(watch);
+  }
+}, 30_000);
 
 // До ответа refresh у маршрута нет геометрии — рисуем прямыми через остановки, потом заменяем.
 function drawMap() {
@@ -324,6 +398,7 @@ async function search() {
   try {
     const { data } = await searchJourneys(q);
     journeys = data.journeys;
+    loadWalkTimes(false);
     earlierRef = data.earlierRef;
     laterRef = data.laterRef;
     refDay = q.when ? q.when.slice(0, 10) : berlinDay(new Date().toISOString());
@@ -352,6 +427,7 @@ async function page(dir: 'earlier' | 'later') {
     if (dir === 'earlier') { journeys = [...fresh, ...journeys]; earlierRef = data.earlierRef; }
     else { journeys = [...journeys, ...fresh]; laterRef = data.laterRef; }
     setStatus(fresh.length ? '' : 'Больше вариантов в этом направлении нет');
+    loadWalkTimes(false);
     render();
   } catch (err) {
     setStatus(failMessage(err), true);
@@ -392,11 +468,21 @@ async function refreshOpen(manual: boolean) {
 
 let watch: W.Watch | null = W.load();
 
+// Когда выходить для поездки (если до станции идти пешком), с текстом для уведомления.
+function leaveInfo(j: Journey): W.Watch['leave'] {
+  const a = accessOf(j, walkMap);
+  if (!a) return null;
+  const t = j.legs.find((l) => !l.walking);
+  const dep = new Date(a.trainDep).toLocaleTimeString('ru-RU', { timeZone: 'Europe/Berlin', hour: '2-digit', minute: '2-digit' });
+  return { leaveAt: a.leaveAt, trainDep: a.trainDep, text: `🚶 ${a.walkMin} мин до ${a.station}, ${t?.line ?? 'поезд'} в ${dep}` };
+}
+
 function checkWatch(data: Journey) {
   if (!watch) return;
   const next = W.snapshot(data);
   W.notify(watch, W.diff(watch.snap, next));
-  watch = { ...watch, id: data.id, snap: next };
+  // Время выхода могло сдвинуться из-за опоздания — тогда «Пора выходить» придёт к новому времени.
+  watch = { ...watch, id: data.id, snap: next, leave: leaveInfo(data) ?? watch.leave ?? null };
   W.save(watch);
 }
 
@@ -410,7 +496,7 @@ async function toggleWatch(j: Journey) {
       setStatus('Уведомления запрещены в настройках браузера для этого сайта', true);
       return;
     }
-    watch = { id: j.id, title: W.journeyTitle(j), snap: W.snapshot(j) };
+    watch = { id: j.id, title: W.journeyTitle(j), snap: W.snapshot(j), leave: leaveInfo(j) };
     W.save(watch);
     setStatus(`Слежу за поездкой: ${watch.title}`);
   }
