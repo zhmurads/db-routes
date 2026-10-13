@@ -1,0 +1,49 @@
+name: db-routes
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    restart: unless-stopped
+    environment:
+      PORT: "8080"
+      REDIS_URL: redis://redis:6379/0
+      TRANSITOUS_CONTACT: ${TRANSITOUS_CONTACT:-}
+      UPSTREAM_LANGUAGE: ${UPSTREAM_LANGUAGE:-de}
+      RATE_LIMIT_PER_MIN: ${RATE_LIMIT_PER_MIN:-60}
+      DB_CLIENT_ID: ${DB_CLIENT_ID:-}
+      DB_API_KEY: ${DB_API_KEY:-}
+      DB_TT_BUDGET_PER_MIN: ${DB_TT_BUDGET_PER_MIN:-50}
+    depends_on:
+      - redis
+    networks: [internal]
+
+  redis:
+    image: docker.io/library/redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--save", "", "--appendonly", "no",
+              "--maxmemory", "${REDIS_MAXMEMORY:-64mb}", "--maxmemory-policy", "allkeys-lru"]
+    networks: [internal]
+
+  caddy:
+    image: docker.io/library/caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${HTTPS_PORT:-8443}:443"
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:-localhost}
+    volumes:
+      - ./caddy:/etc/caddy:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - backend
+    networks: [internal]
+
+networks:
+  internal:
+
+volumes:
+  caddy_data:
+  caddy_config:

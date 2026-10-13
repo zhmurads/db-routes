@@ -1,0 +1,6 @@
+{$SITE_ADDRESS} {
+	# localhost → сертификат от внутреннего CA Caddy; для настоящего домена эту строку убрать
+	tls internal
+	encode zstd gzip
+	reverse_proxy backend:8080
+}

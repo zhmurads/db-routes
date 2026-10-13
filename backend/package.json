@@ -1,0 +1,23 @@
+{
+  "name": "db-routes-backend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/server.js"
+  },
+  "dependencies": {
+    "express": "^5.1.0",
+    "express-rate-limit": "^8.1.0",
+    "fast-xml-parser": "^5.11.2",
+    "helmet": "^8.1.0",
+    "rate-limit-redis": "^4.2.2",
+    "redis": "^5.8.2"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.3",
+    "@types/node": "^22.18.0",
+    "typescript": "^5.9.2"
+  }
+}

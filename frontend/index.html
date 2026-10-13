@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#16181d" media="(prefers-color-scheme: dark)">
+  <title>Поезда по Германии</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🚆</text></svg>">
+</head>
+<body>
+  <header class="top">
+    <h1>Поезда по Германии</h1>
+    <span class="sub">расписание и опоздания в реальном времени</span>
+  </header>
+
+  <main>
+    <form id="search" class="panel" autocomplete="off" novalidate>
+      <div class="stations">
+        <div class="field station" data-field="from">
+          <label for="from">Откуда</label>
+          <input id="from" type="text" placeholder="Станция отправления" role="combobox"
+                 aria-autocomplete="list" aria-expanded="false" aria-controls="from-list" enterkeyhint="next">
+          <ul id="from-list" class="suggest" role="listbox" hidden></ul>
+        </div>
+        <button type="button" id="swap" class="swap" title="Поменять местами" aria-label="Поменять станции местами">⇅</button>
+        <div class="field station" data-field="to">
+          <label for="to">Куда</label>
+          <input id="to" type="text" placeholder="Станция прибытия" role="combobox"
+                 aria-autocomplete="list" aria-expanded="false" aria-controls="to-list" enterkeyhint="search">
+          <ul id="to-list" class="suggest" role="listbox" hidden></ul>
+        </div>
+      </div>
+
+      <div class="row when">
+        <div class="seg" role="radiogroup" aria-label="Время отправления или прибытия">
+          <label><input type="radio" name="mode" value="dep" checked><span>Отправление</span></label>
+          <label><input type="radio" name="mode" value="arr"><span>Прибытие</span></label>
+        </div>
+        <input id="date" type="date" aria-label="Дата">
+        <input id="time" type="time" aria-label="Время">
+        <button type="button" id="now" class="link">сейчас</button>
+      </div>
+
+      <fieldset class="products">
+        <legend class="sr">Виды транспорта</legend>
+        <label class="chip"><input type="checkbox" name="p" value="ice" checked><span>ICE</span></label>
+        <label class="chip"><input type="checkbox" name="p" value="ic" checked><span>IC/EC</span></label>
+        <label class="chip"><input type="checkbox" name="p" value="regional" checked><span>RE/RB</span></label>
+        <label class="chip"><input type="checkbox" name="p" value="sbahn" checked><span>S-Bahn</span></label>
+        <label class="chip"><input type="checkbox" name="p" value="city" checked><span>Автобус, трамвай, U-Bahn</span></label>
+      </fieldset>
+
+      <details id="more">
+        <summary>Ещё: через станцию, время пересадки</summary>
+        <div class="more">
+          <div class="field station" data-field="via">
+            <label for="via">Через станцию</label>
+            <input id="via" type="text" placeholder="Необязательно" role="combobox"
+                   aria-autocomplete="list" aria-expanded="false" aria-controls="via-list">
+            <ul id="via-list" class="suggest" role="listbox" hidden></ul>
+          </div>
+          <div class="field">
+            <label for="transfer">Мин. время пересадки</label>
+            <select id="transfer">
+              <option value="0">как в расписании</option>
+              <option value="5">5 мин</option>
+              <option value="10">10 мин</option>
+              <option value="15">15 мин</option>
+              <option value="20">20 мин</option>
+              <option value="30">30 мин</option>
+            </select>
+          </div>
+        </div>
+      </details>
+
+      <button type="submit" class="primary" id="go">Найти</button>
+    </form>
+
+    <p id="status" class="status" role="status" aria-live="polite"></p>
+
+    <section id="results" hidden>
+      <button type="button" id="earlier" class="pager">↑ Раньше</button>
+      <ol id="list" class="journeys"></ol>
+      <button type="button" id="later" class="pager">↓ Позже</button>
+    </section>
+  </main>
+
+  <footer class="foot">
+    Данные: <a href="https://transitous.org/" target="_blank" rel="noopener">Transitous</a>
+    (<a href="https://transitous.org/sources/" target="_blank" rel="noopener">источники</a>),
+    © участники <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>.
+    Время — по Берлину.
+  </footer>
+
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>
