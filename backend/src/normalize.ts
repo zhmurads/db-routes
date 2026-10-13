@@ -52,7 +52,8 @@ export interface Leg {
   walking: boolean; mode: string; product: string; line: string | null; number: string | null;
   direction: string | null; operator: string | null; realtime: boolean; cancelled: boolean;
   additional: boolean; stayInVehicle: boolean; durationMin: number; distanceM: number | null;
-  origin: string; destination: string; originPos: Pos; destinationPos: Pos; dep: TimePoint; arr: TimePoint;
+  origin: string; destination: string; originPos: Pos; destinationPos: Pos;
+  originStopId: string | null; destinationStopId: string | null; dep: TimePoint; arr: TimePoint;
   stopovers: Stopover[]; warnings: Warning[]; geometry: Geometry | null;
 }
 export interface Journey {
@@ -110,6 +111,8 @@ function leg(l: MLeg): Leg {
     destination: l.to.name,
     originPos: [l.from.lat, l.from.lon],
     destinationPos: [l.to.lat, l.to.lon],
+    originStopId: l.from.stopId ?? null,
+    destinationStopId: l.to.stopId ?? null,
     dep: point(l.scheduledStartTime, l.startTime, l.from, rt, cancelled),
     arr: point(l.scheduledEndTime, l.endTime, l.to, rt, cancelled),
     stopovers: (l.intermediateStops ?? []).map((s) => ({

@@ -1,7 +1,7 @@
 // Сверка поездов маршрута с табло DB (Timetables API): время, путь, отмена и сообщения DB
 // заменяют данные Transitous там, где поезд нашёлся на табло.
 import { BudgetExceeded, changes, plan, stationEvas, ttEnabled, type Change, type PlanStop, type TTMessage } from './dbtimetables.js';
-import { evasNear } from './eva.js';
+import { evasForStop } from './eva.js';
 import { IRIS_SILENT, himText, irisText } from './irisCodes.js';
 import type { Journey, Leg, Pos, TimePoint, Warning } from './normalize.js';
 import { fromIris, toIris } from './time.js';
@@ -27,21 +27,31 @@ function trainNumbers(l: Leg): string[] {
   return [...out];
 }
 
-async function findOnBoard(pos: Pos, plannedIso: string, kind: Kind, l: Leg, plannedPlatform: string | null): Promise<Hit | null> {
+// Номер линии из названия: «S8» → «8», «RE 5» → «5», «RB51 (15506)» → «51».
+function lineNumber(l: Leg): string | null {
+  const m = /^[A-Za-z]+\s?(\d+[A-Za-z]?)\b/.exec(l.line ?? '');
+  return m ? m[1] : null;
+}
+
+async function findOnBoard(stopId: string | null, pos: Pos, plannedIso: string, kind: Kind, l: Leg, plannedPlatform: string | null): Promise<Hit | null> {
   const t = toIris(plannedIso);
   const day = t.slice(0, 6), hour = t.slice(6, 8);
   const nums = trainNumbers(l);
   const family = FAMILY[l.product] ?? [];
 
   const tried = new Set<string>();
-  for (const near of evasNear(pos[0], pos[1]).slice(0, 2)) {
+  for (const near of evasForStop(stopId, pos[0], pos[1]).slice(0, 2)) {
     for (const eva of await stationEvas(near.eva)) {
       if (tried.has(eva)) continue;
       tried.add(eva);
-      const atTime = (await plan(eva, day, hour)).filter((s) => s[kind]?.pt === t);
+      const atTime = (await plan(eva, day, hour)).filter((s) => s[kind]?.pt === t && !s[kind]!.hidden);
       if (!atTime.length) continue;
       const byNumber = atTime.find((s) => nums.includes(String(Number(s.number))));
       if (byNumber) return { eva, stop: byNumber };
+      // Номер линии (l): «S8» → 8, «RE5» → 5 — при той же категории.
+      const lineNo = lineNumber(l);
+      const byLine = lineNo ? atTime.filter((s) => family.includes(s.category) && s[kind]?.line === lineNo) : [];
+      if (byLine.length === 1) return { eva, stop: byLine[0] };
       // Номер не совпал (у региональных поездов его часто нет) — категория + однозначность (+ путь).
       let cands = atTime.filter((s) => family.includes(s.category));
       if (cands.length > 1 && plannedPlatform) cands = cands.filter((s) => s[kind]?.pp === plannedPlatform);
@@ -58,13 +68,16 @@ function messages(ch: Change, kind: Kind, now: number): Warning[] {
   for (const m of list) {
     let title: string | null = null;
     if ((m.t === 'd' || m.t === 'q') && m.c && !IRIS_SILENT.has(m.c)) title = irisText(m.c);
-    if (m.t === 'h' && m.cat && m.del !== '1') {
+    // h — сообщение HIM, r — крупное нарушение движения; del="1" — сообщение снято.
+    if ((m.t === 'h' || m.t === 'r') && m.del !== '1') {
       const active = (!m.from || Date.parse(fromIris(m.from)) <= now) && (!m.to || Date.parse(fromIris(m.to)) >= now);
-      if (active) title = himText(m.cat);
+      if (active) title = m.cat ? himText(m.cat) : m.ext ? 'Нарушение движения' : null;
     }
     if (title && !seen.has(title)) {
       seen.add(title);
-      out.push({ title, text: '', url: null, source: 'db' });
+      // ext — внешний текст DB (немецкий), elnk — ссылка; в живых ответах пока не встречались.
+      const text = m.ext && m.ext !== title ? m.ext : '';
+      out.push({ title, text, url: m.elnk ?? null, source: 'db' });
     }
   }
   return out;
@@ -73,8 +86,9 @@ function messages(ch: Change, kind: Kind, now: number): Warning[] {
 async function enrichPoint(l: Leg, kind: Kind, now: number): Promise<Warning[]> {
   const tp: TimePoint = kind === 'dp' ? l.dep : l.arr;
   const pos = kind === 'dp' ? l.originPos : l.destinationPos;
+  const stopId = kind === 'dp' ? l.originStopId : l.destinationStopId;
   if (!tp.planned) return [];
-  const hit = await findOnBoard(pos, tp.planned, kind, l, tp.plannedPlatform);
+  const hit = await findOnBoard(stopId, pos, tp.planned, kind, l, tp.plannedPlatform);
   if (!hit) return [];
   const planned = hit.stop[kind]!;
   const ch = (await changes(hit.eva))[hit.stop.id];

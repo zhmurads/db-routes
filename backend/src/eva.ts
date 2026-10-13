@@ -1,20 +1,22 @@
-// Сопоставление остановки (координаты из Transitous) с номерами станций DB (EVA).
-// Справочник: backend/data/db-stations.json, собирается scripts/build-stations.mjs из npm-пакета db-stations.
+// Сопоставление остановки из Transitous с номерами станций DB (EVA).
+// Справочник: backend/data/db-stations.json, собирается scripts/build-stations.mjs из StaDa (или npm db-stations).
 import { readFileSync } from 'node:fs';
 
-type Row = [eva: string, lat: number, lon: number, name: string];
+type Row = [eva: string, lat: number, lon: number, name: string, ifopt?: string | null];
 
 const CELL = 0.01; // ~1 км по широте
 const RADIUS_M = 400;
 
 const rows: Row[] = JSON.parse(readFileSync(new URL('../data/db-stations.json', import.meta.url), 'utf8'));
 const grid = new Map<string, Row[]>();
+const byIfopt = new Map<string, Row[]>();
 const cellKey = (lat: number, lon: number) => `${Math.floor(lat / CELL)}:${Math.floor(lon / CELL)}`;
 for (const r of rows) {
   const k = cellKey(r[1], r[2]);
   const list = grid.get(k);
   if (list) list.push(r);
   else grid.set(k, [r]);
+  if (r[4]) byIfopt.set(r[4], [...(byIfopt.get(r[4]) ?? []), r]);
 }
 
 const rad = (x: number) => (x * Math.PI) / 180;
@@ -37,6 +39,19 @@ export function evasNear(lat: number, lon: number): { eva: string; name: string;
     }
   }
   return found.sort((a, b) => a.distM - b.distM);
+}
+
+// Остановка → станции DB: точно по IFOPT из stopId (…_de:09162:100:11:11 → de:09162:100),
+// иначе по координатам. IFOPT у DELFI и DB иногда расходится (Berlin Hbf: …3200 и …3201), поэтому радиус остаётся.
+export function evasForStop(stopId: string | null, lat: number, lon: number): { eva: string; name: string; distM: number }[] {
+  const ifopt = /(?:^|_)(de:\d{5}:\d+)/.exec(stopId ?? '')?.[1];
+  const exact = ifopt ? byIfopt.get(ifopt) : undefined;
+  if (exact?.length) {
+    return exact
+      .map((r) => ({ eva: r[0], name: r[3], distM: Math.round(distM(lat, lon, r[1], r[2])) }))
+      .sort((a, b) => a.distM - b.distM);
+  }
+  return evasNear(lat, lon);
 }
 
 export const stationCount = rows.length;

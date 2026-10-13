@@ -6,7 +6,9 @@ const get = async (u) => { const r = await (await fetch(B + u)).json(); if (!r.o
 const sid = async (q) => (await get('/stations?q=' + encodeURIComponent(q)))[0].id;
 const hm = (iso) => (iso ? new Date(iso).toLocaleTimeString('ru-RU', { timeZone: 'Europe/Berlin', hour: '2-digit', minute: '2-digit' }) : '—');
 const fmt = (p) => `${hm(p.planned)}${p.actual ? '→' + hm(p.actual) : ''}${p.delayMin ? ` (${p.delayMin > 0 ? '+' : ''}${p.delayMin})` : ''} пут.${p.platform ?? '?'}${p.cancelled ? ' ОТМЕНА' : ''}`;
-const pairs = [['Frankfurt Hbf', 'Köln Hbf'], ['München Hbf', 'Nürnberg Hbf'], ['Berlin Hbf', 'Hamburg Hbf'], ['Hamburg Hbf', 'Hannover Hbf']];
+const pairs = [['Frankfurt Hbf', 'Köln Hbf'], ['München Hbf', 'Nürnberg Hbf'], ['Berlin Hbf', 'Hamburg Hbf'], ['Hamburg Hbf', 'Hannover Hbf'],
+  // региональные и S-Bahn: проверка сопоставления по номеру линии
+  ['Berlin Hbf', 'Potsdam Hbf'], ['Köln Hbf', 'Düsseldorf Hbf'], ['München Hbf', 'Freising']];
 let pts = 0, db = 0;
 for (const [a, b] of pairs) {
   const page = await get(`/journeys?from=${encodeURIComponent(await sid(a))}&to=${encodeURIComponent(await sid(b))}`);

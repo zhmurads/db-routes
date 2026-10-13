@@ -43,11 +43,14 @@ async function ttGet(path: string): Promise<any> {
 }
 
 // --- Типы ---
-export interface TTMessage { t: string; c?: string; cat?: string; from?: string; to?: string; del?: string; pr?: string }
-interface TTEvent { pt?: string; pp?: string; ct?: string; cp?: string; cs?: string; m?: TTMessage[] }
+// t: h — HIM, r — крупное нарушение, d — причина задержки, q — качество, f/i/u/c — служебные (не показываем).
+export interface TTMessage { t: string; c?: string; cat?: string; from?: string; to?: string; del?: string; pr?: string; ext?: string; elnk?: string; ec?: string }
+interface TTEvent { pt?: string; pp?: string; ct?: string; cp?: string; cs?: string; l?: string; hi?: string; m?: TTMessage[] }
 interface TTStop { id: string; eva?: string; tl?: { c?: string; n?: string }; ar?: TTEvent; dp?: TTEvent; m?: TTMessage[] }
 
-export interface PlanStop { id: string; category: string; number: string; ar?: { pt: string; pp?: string }; dp?: { pt: string; pp?: string } }
+// line — номер линии (l, например «8» у S8); hidden — событие без посадки/высадки (hi=1).
+interface PlanEvent { pt: string; pp?: string; line?: string; hidden: boolean }
+export interface PlanStop { id: string; category: string; number: string; ar?: PlanEvent; dp?: PlanEvent }
 export interface Change { ar?: TTEvent; dp?: TTEvent; m: TTMessage[] }
 
 const stops = (doc: any): TTStop[] => doc?.timetable?.s ?? [];
@@ -63,6 +66,8 @@ export function stationEvas(eva: string): Promise<string[]> {
   });
 }
 
+const event = (e: TTEvent): PlanEvent => ({ pt: e.pt!, pp: e.pp, line: e.l, hidden: e.hi === '1' });
+
 // План станции за час (yyMMdd, HH). Кэш 6 часов.
 export function plan(eva: string, day: string, hour: string): Promise<PlanStop[]> {
   return cached(`tt:plan:${eva}:${day}:${hour}`, 6 * 3600, async () => {
@@ -71,8 +76,8 @@ export function plan(eva: string, day: string, hour: string): Promise<PlanStop[]
       id: s.id,
       category: s.tl?.c ?? '',
       number: s.tl?.n ?? '',
-      ar: s.ar?.pt ? { pt: s.ar.pt, pp: s.ar.pp } : undefined,
-      dp: s.dp?.pt ? { pt: s.dp.pt, pp: s.dp.pp } : undefined,
+      ar: s.ar?.pt ? event(s.ar) : undefined,
+      dp: s.dp?.pt ? event(s.dp) : undefined,
     }));
   });
 }

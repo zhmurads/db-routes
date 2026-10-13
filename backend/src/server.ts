@@ -6,6 +6,7 @@ import { config } from './config.js';
 import { redis } from './cache.js';
 import { api } from './routes.js';
 import { ApiError } from './upstream.js';
+import { ttEnabled } from './dbtimetables.js';
 
 await redis.connect().catch((err) => console.error('redis connect', err.message));
 
@@ -39,7 +40,8 @@ const limiter = (prefix: string, limit: number) => rateLimit({
   }),
 });
 
-app.get('/api/health', (_req, res) => res.json({ ok: true, redis: redis.isReady }));
+// db — задан ли ключ DB Timetables (сверка с табло DB включена).
+app.get('/api/health', (_req, res) => res.json({ ok: true, redis: redis.isReady, db: ttEnabled() }));
 app.use('/api/stations', limiter('st', config.rateLimitPerMin * 2));
 app.use('/api', limiter('api', config.rateLimitPerMin));
 app.use('/api', api);
